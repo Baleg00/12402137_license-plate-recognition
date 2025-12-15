@@ -71,3 +71,57 @@ I plan to use the OpenALPR Benchmark Dataset or CCPD (Chinese City Parking Datas
 - A working end-to-end pipeline combining segmentation, post-processing, and OCR.
 - Evaluation of segmentation performance and OCR accuracy.
 - A short demo of the system on test images.
+
+---
+
+## 5. Success Criteria & Metrics
+
+**Success is achieved if:**
+
+1. The improved model shows $\ge+3$ pp mIoU and $\ge +5$ pp exact-match OCR accuracy over the baseline.
+2. Model latency increases by no more than $20\%$ compared to baseline.
+3. Ablation studies demonstrate measurable effects of architectural and training modifications.
+
+---
+
+### 5.1. Evaluation Metrics
+
+| Stage                       | Metric                             | Description / Goal                                                |
+| --------------------------- | ---------------------------------- | ----------------------------------------------------------------- |
+| Segmentation                | Mean IoU (mIoU)                    | Main accuracy measure for plate mask overlap, target $\ge 0.85$   |
+|                             | Dice Coefficient (F1)              | Pixel-wise precision/recall balance, target $\ge 0.90$            |
+| OCR / End-to-End            | Exact Match Rate (EMR)             | % of plates with perfectly recognized text, target $\ge 80\%$     |
+|                             | Character-Level Accuracy (CLA)     | Average per-character correctness (1 - normalized Levenshtein)    |
+| Robustness & Efficiency     | Condition robustness               | EMR drop $\le 10$ pp across day/night or angle changes            |
+|                             | Latency / Throughput               | $\le 20$ ms per image ($640 \times 384$ on GPU)                   |
+|                             | Model Size / FLOPs                 | $\le 10$ M parameters or $\le 40$ GFLOPs                          |
+
+---
+
+### 5.2. Baseline vs. Improvements
+
+- **Baseline A:** Small U-Net (BCE + Dice loss) with standard augmentations.
+- **Improved B:** Add channel/spatial attention (SE / CBAM), dilated bottleneck, or FPN-style skip.
+- **Improved C:** Focal + Dice loss, perspective rectification, and OCR pre-processing variants.
+
+Each improvement will be validated through controlled ablations showing metric gains or efficiency trade-offs.
+
+---
+
+### 5.3. Experimental Plan
+
+| Aspect            | Variations Tested                   | Metric(s)             |
+| ----------------- | ----------------------------------- | --------------------- |
+| Loss function     | BCE + Dice vs Focal + Dice          | mIoU, Dice            |
+| Attention block   | None / SE / CBAM                    | mIoU, params, latency |
+| Upsampling        | Transposed Conv / Bilinear + 1x1    | mIoU, latency         |
+| OCR preprocessing | CLAHE / +Threshold / +Rectification | EMR, CLA              |
+| Resolution        | 512 / 640 / 768 short side          | mIoU, latency         |
+
+---
+
+### 5.4. Reporting
+
+- Quantitative results: mIoU, Dice, EMR, CLA, latency, params/FLOPs.
+- Qualitative results: visual mask overlays and OCR outputs (success / failure cases).
+- All metrics computed on a fixed held-out validation split for reproducibility.
