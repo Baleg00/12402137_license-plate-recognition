@@ -14,7 +14,7 @@ from pathlib import Path
 from CCPD import CCPDDataset
 from helpers import get_train_transform, get_val_transform
 from UNet import UNetSmall
-from training import train_one_epoch, validate, load_model, test_checkpoint
+from training import train_one_epoch, validate, load_model, test_checkpoint, create_model
 from sampler import RandomSubsetSampler
 
 
@@ -130,22 +130,20 @@ def main() -> None:
 
     # Train from scratch
     if args.command == "train":
-        model = UNetSmall(in_ch=3, base_ch=32, attention=args.attention).to(device)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
+        model, optim, device = create_model(attention=args.attention)
 
         for epoch in range(args.epochs):
-            tr_loss = train_one_epoch(model, train_dl, optimizer, device)
-            te_loss, te_iou = validate(model, test_dl, device)
-            print(f"Epoch {epoch:02d} | train {tr_loss:.4f} | test {te_loss:.4f} | IoU {te_iou:.4f}")
+            train_loss = train_one_epoch(model, train_dl, optim, device)
+            test_loss, test_iou, _ = validate(model, test_dl, device)
+            print(f"Epoch {epoch:02d} | train {train_loss:.4f} | test {test_loss:.4f} | IoU {test_iou:.4f}")
 
-            save_checkpoint(args.out, model, optimizer, epoch)
+            save_checkpoint(args.out, model, optim, epoch)
 
         return
 
     # Resume training from checkpoint
     if args.command == "resume":
-        model = UNetSmall(in_ch=3, base_ch=32, attention=args.attention).to(device)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
+        model, optim, device = create_model(attention=args.attention)
 
         ckpt = torch.load(args.ckpt, map_location="cpu")
         model = load_model(model, args.ckpt, device=device, strict=args.strict)
@@ -154,18 +152,18 @@ def main() -> None:
         if isinstance(ckpt, dict):
             if "optimizer" in ckpt:
                 try:
-                    optimizer.load_state_dict(ckpt["optimizer"])
+                    optim.load_state_dict(ckpt["optimizer"])
                 except Exception:
                     print("Warning: could not load optimizer state (continuing with fresh optimizer).")
             if "epoch" in ckpt:
                 start_epoch = int(ckpt["epoch"]) + 1
 
         for epoch in range(start_epoch, args.epochs):
-            tr_loss = train_one_epoch(model, train_dl, optimizer, device)
-            te_loss, te_iou = validate(model, test_dl, device)
-            print(f"Epoch {epoch:02d} | train {tr_loss:.4f} | test {te_loss:.4f} | IoU {te_iou:.4f}")
+            train_loss = train_one_epoch(model, train_dl, optim, device)
+            test_loss, test_iou, _ = validate(model, test_dl, device)
+            print(f"Epoch {epoch:02d} | train {train_loss:.4f} | test {test_loss:.4f} | IoU {test_iou:.4f}")
 
-            save_checkpoint(args.out, model, optimizer, epoch)
+            save_checkpoint(args.out, model, optim, epoch)
 
         return
 
