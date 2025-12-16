@@ -46,6 +46,49 @@ def letterbox(img, mask, target_hw=(512, 512), border_value=(114, 114, 114)):
     return img_padded, mask_padded
 
 
+def letterbox_rgb(img_rgb: np.ndarray, target_hw: tuple[int, int]) -> tuple[np.ndarray, tuple[float, int, int]]:
+    """
+    Resize with unchanged aspect ratio and pad to target_hw (H,W).
+    Returns padded image and (scale, pad_left, pad_top) for unletterboxing.
+    """
+    target_height, target_width = target_hw
+    height, width = img_rgb.shape[:2]
+
+    scale = min(target_width / width, target_height / height)
+    new_width, new_height = int(round(width * scale)), int(round(height * scale))
+
+    resized = cv2.resize(img_rgb, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+
+    pad_left = (target_width - new_width) // 2
+    pad_right = target_width - new_width - pad_left
+    pad_top = (target_height - new_height) // 2
+    pad_bottom = target_height - new_height - pad_top
+
+    padded = cv2.copyMakeBorder(
+        resized, pad_top, pad_bottom, pad_left, pad_right,
+        borderType=cv2.BORDER_CONSTANT, value=(114, 114, 114)
+    )
+    return padded, (scale, pad_left, pad_top)
+
+
+def unletterbox_mask(mask_hw: np.ndarray, original_hw: tuple[int, int], meta: tuple[float, int, int]) -> np.ndarray:
+    """
+    Undo letterbox on a predicted mask:
+    - crop padding
+    - resize back to original image size
+    """
+    scale, pad_left, pad_top = meta
+    original_height, original_width = original_hw
+
+    new_width = int(round(original_width * scale))
+    new_height = int(round(original_height * scale))
+
+    cropped = mask_hw[pad_top:pad_top + new_height, pad_left:pad_left + new_width]
+
+    out = cv2.resize(cropped, (original_width, original_height), interpolation=cv2.INTER_NEAREST)
+    return out
+
+
 def bbox_to_mask(height, width, bbox):
     """
     bbox = (x_min, y_min, x_max, y_max) in pixel coords
