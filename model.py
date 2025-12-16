@@ -15,7 +15,7 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 import json
 import time
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Literal
 
 import cv2
 import numpy as np
@@ -360,9 +360,16 @@ class CCPDDataset(Dataset):
 # =====================
 
 class ConvBlock(nn.Module):
-    """(Conv -> BN -> ReLU) x 2, optional CBAM attention at the end."""
-
-    def __init__(self, in_ch: int, out_ch: int, use_cbam: bool = False) -> None:
+    """
+    (Conv -> BN -> ReLU) x 2 + optional attention
+    attention: "none" | "se" | "cbam"
+    """
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        attention: Literal["none", "se", "cbam"] = "none"
+    ) -> None:
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
@@ -372,7 +379,13 @@ class ConvBlock(nn.Module):
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
         )
-        self.attn = CBAM(out_ch) if use_cbam else nn.Identity()
+
+        if attention == "se":
+            self.attn = SEBlock(out_ch)
+        elif attention == "cbam":
+            self.attn = CBAM(out_ch)
+        else:
+            self.attn = nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.block(x)
@@ -381,11 +394,10 @@ class ConvBlock(nn.Module):
 
 class Down(nn.Module):
     """Downscale with maxpool then double conv"""
-
-    def __init__(self, in_ch: int, out_ch: int, use_cbam: bool = False) -> None:
+    def __init__(self, in_ch: int, out_ch: int, attention: Literal["none", "se", "cbam"] = "none") -> None:
         super().__init__()
         self.pool = nn.MaxPool2d(2)
-        self.conv = ConvBlock(in_ch, out_ch, use_cbam=use_cbam)
+        self.conv = ConvBlock(in_ch, out_ch, attention=attention)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.conv(self.pool(x))
@@ -393,21 +405,42 @@ class Down(nn.Module):
 
 class Up(nn.Module):
     """Upscale then double conv. Uses transposed conv for upsampling."""
-
-    def __init__(self, in_ch: int, out_ch: int, use_cbam: bool = False) -> None:
+    def __init__(self, in_ch: int, out_ch: int, attention: Literal["none", "se", "cbam"] = "none") -> None:
         super().__init__()
         self.up = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
-        self.conv = ConvBlock(in_ch, out_ch, use_cbam=use_cbam)
+        self.conv = ConvBlock(in_ch, out_ch, attention=attention)
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
         x = self.up(x)
 
         diff_y = skip.size(-2) - x.size(-2)
         diff_x = skip.size(-1) - x.size(-1)
-        x = F.pad(x, [diff_x // 2, diff_x - diff_x // 2, diff_y // 2, diff_y - diff_y // 2])
+        x = F.pad(x, [diff_x // 2, diff_x - diff_x // 2,
+                      diff_y // 2, diff_y - diff_y // 2])
 
         x = torch.cat([skip, x], dim=1)
         return self.conv(x)
+
+
+class SEBlock(nn.Module):
+    """
+    Squeeze-and-Excitation (SE) block:
+    - Channel-wise attention via global average pooling
+    """
+    def __init__(self, channels: int, reduction: int = 16) -> None:
+        super().__init__()
+        hidden = max(channels // reduction, 4)
+        self.fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(channels, hidden, kernel_size=1, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden, channels, kernel_size=1, bias=True),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        w = self.fc(x)
+        return x * w
 
 
 class CBAM(nn.Module):
@@ -469,31 +502,37 @@ class UNetSmall(nn.Module):
     """
     Lightweight U-Net for binary segmentation (1 class: plate vs background):
     - CBAM attention in encoder/decoder blocks
+    - SE attention in encoder/decoder blocks
     - Dilated bottleneck (larger receptive field)
     - One FPN-style lateral fusion at the 1/4 scale (x2 -> y2)
     
     Input: 3xHxW, Output: 1xHxW logits (use with BCEWithLogits).
     """
 
-    def __init__(self, in_ch: int = 3, base_ch: int = 32, use_cbam: bool = True) -> None:
+    def __init__(
+        self,
+        in_ch: int = 3,
+        base_ch: int = 32,
+        attention: Literal["none", "se", "cbam"] = "none",
+    ) -> None:
         super().__init__()
 
         # Encoder
-        self.inc = ConvBlock(in_ch, base_ch, use_cbam=use_cbam)
-        self.down1 = Down(base_ch, base_ch * 2, use_cbam=use_cbam)
-        self.down2 = Down(base_ch * 2, base_ch * 4, use_cbam=use_cbam)
-        self.down3 = Down(base_ch * 4, base_ch * 8, use_cbam=use_cbam)
+        self.inc = ConvBlock(in_ch, base_ch, attention=attention)
+        self.down1 = Down(base_ch, base_ch * 2, attention=attention)
+        self.down2 = Down(base_ch * 2, base_ch * 4, attention=attention)
+        self.down3 = Down(base_ch * 4, base_ch * 8, attention=attention)
 
-        # Bottleneck (dilated)
+        # Dilated bottleneck
         self.bottleneck = DilatedConvBlock(base_ch * 8, base_ch * 16)
 
         # Decoder
-        self.up3 = Up(base_ch * 16, base_ch * 8, use_cbam=use_cbam)
-        self.up2 = Up(base_ch * 8, base_ch * 4, use_cbam=use_cbam)
-        self.up1 = Up(base_ch * 4, base_ch * 2, use_cbam=use_cbam)
-        self.up0 = Up(base_ch * 2, base_ch, use_cbam=use_cbam)
+        self.up3 = Up(base_ch * 16, base_ch * 8, attention=attention)
+        self.up2 = Up(base_ch * 8, base_ch * 4, attention=attention)
+        self.up1 = Up(base_ch * 4, base_ch * 2, attention=attention)
+        self.up0 = Up(base_ch * 2, base_ch, attention=attention)
 
-        # FPN-style lateral fusion at 1/4 scale (x2)
+        # FPN-style lateral fusion (1/4 scale)
         self.lat_x2 = nn.Conv2d(base_ch * 4, base_ch * 4, kernel_size=1, bias=False)
 
         # Head
@@ -592,9 +631,9 @@ def iou_score(
 
 def create_model(
     device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu",
-    use_cbam: bool = False
+    attention: Literal["none", "se", "cbam"] = "none"
 ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.device]:
-    model = UNetSmall(in_ch=3, base_ch=32, use_cbam=use_cbam).to(device)
+    model = UNetSmall(in_ch=3, base_ch=32, attention=attention).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
     return model, optimizer, device
 
