@@ -2,6 +2,7 @@
 
 - **Student**: Balázs Róna
 - **Project Type**: Bring Your Own Method
+- **Python Version**: 3.12.0
 
 ---
 
