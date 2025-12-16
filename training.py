@@ -11,6 +11,7 @@ from metrics import DiceLoss
 from UNet import UNetSmall
 from CCPD import CCPDDataset
 from helpers import get_val_transform
+from sampler import RandomSubsetSampler
 
 
 # ==================
@@ -99,7 +100,7 @@ def train_one_epoch(
     model.train()
     total_loss = 0.0
 
-    for imgs, masks, _ in tqdm(loader):
+    for imgs, masks, _ in tqdm(loader, desc="Training", leave=False):
         imgs, masks = imgs.to(device), masks.to(device)
         logits = model(imgs)
         loss = bce_dice_loss(logits, masks, bce_weight=0.5)
@@ -116,11 +117,11 @@ def validate(
     model: torch.nn.Module,
     loader: DataLoader,
     device: torch.device,
-) -> tuple[float, float]:
+) -> tuple[float, float, int]:
     model.eval()
     total_loss, total_iou, n = 0.0, 0.0, 0
 
-    for imgs, masks, _ in tqdm(loader):
+    for imgs, masks, _ in tqdm(loader, desc="Validating", leave=False):
         imgs, masks = imgs.to(device), masks.to(device)
         logits = model(imgs)
         loss = bce_dice_loss(logits, masks, bce_weight=0.5)
@@ -128,46 +129,7 @@ def validate(
         total_iou += iou_score(logits, masks) * imgs.size(0)
         n += imgs.size(0)
 
-    return total_loss / n, total_iou / n
-
-
-@torch.no_grad()
-def evaluate_model(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    device: torch.device,
-    thr: float = 0.5,
-    eps: float = 1e-6,
-) -> Dict[str, float]:
-    """
-    Evaluate loss + IoU on a dataset loader.
-    Returns scalar metrics.
-    """
-    model.eval()
-
-    total_loss = 0.0
-    total_iou = 0.0
-    n = 0
-
-    for imgs, masks, _ in tqdm(loader, desc="Evaluating", leave=False):
-        imgs = imgs.to(device, non_blocking=True)
-        masks = masks.to(device, non_blocking=True)
-
-        logits = model(imgs)
-
-        loss = bce_dice_loss(logits, masks)
-        iou = iou_score(logits, masks, thr=thr, eps=eps)
-
-        bs = imgs.size(0)
-        total_loss += float(loss.item()) * bs
-        total_iou += float(iou) * bs
-        n += bs
-
-    return {
-        "loss": total_loss / max(n, 1),
-        "iou": total_iou / max(n, 1),
-        "samples": float(n),
-    }
+    return total_loss / n, total_iou / n, n
 
 
 def test_checkpoint(
@@ -177,7 +139,9 @@ def test_checkpoint(
     batch_size: int = 8,
     num_workers: int = 4,
     input_hw: Tuple[int, int] = (512, 512),
-    threshold: float = 0.5,
+    attention: Literal["none", "se", "cbam"] = "none",
+    subset_size: int = 64,
+    strict: bool = True,
 ) -> Dict[str, float]:
     """
     Load a model from checkpoint and evaluate it on the given split.
@@ -188,16 +152,13 @@ def test_checkpoint(
     @param batch_size: evaluation batch size
     @param num_workers: dataloader workers
     @param input_hw: (H,W) for val transform
-    @param threshold: threshold for IoU binarization
-
-    @return: dict with loss/iou/samples
+    @param attention: attention model
+    @param subset_size: test sample subset size
+    @param strict: strict checkpoint loading
     """
     checkpoint_path = Path(checkpoint_path)
     dataset_root = Path(dataset_root)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Dataset / loader
     ds = CCPDDataset(
         root=str(dataset_root),
         split_txt=split_txt,
@@ -209,18 +170,16 @@ def test_checkpoint(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=(device.type == "cuda"),
+        pin_memory=True,
+        sampler=RandomSubsetSampler(len(ds), subset_size),
     )
 
-    # Model + load weights
-    model = UNetSmall(in_ch=3, base_ch=32).to(device)
-    model = load_model(model, checkpoint_path, device=device, strict=True)
+    model, _, device = create_model(attention=attention)
+    model = load_model(model, checkpoint_path, device, strict)
 
-    # Evaluate
-    metrics = evaluate_model(model, loader, device=device, thr=threshold)
+    loss, iou, samples = validate(model, loader, device)
 
     print(
         f"[{split_txt}] checkpoint={checkpoint_path.name} | "
-        f"loss={metrics['loss']:.4f} | IoU={metrics['iou']:.4f} | n={int(metrics['samples'])}"
+        f"loss={loss:.4f} | IoU={iou:.4f} | n={samples}"
     )
-    return metrics

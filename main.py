@@ -15,6 +15,7 @@ from CCPD import CCPDDataset
 from helpers import get_train_transform, get_val_transform
 from UNet import UNetSmall
 from training import train_one_epoch, validate, load_model, test_checkpoint
+from sampler import RandomSubsetSampler
 
 
 # =============
@@ -26,6 +27,7 @@ def build_loaders(
     input_hw: tuple[int, int],
     batch_size: int,
     num_workers: int,
+    subset_size: int,
 ) -> tuple[DataLoader, DataLoader]:
     dataset_root = Path(dataset_root)
 
@@ -42,12 +44,14 @@ def build_loaders(
 
     pin = torch.cuda.is_available()
     train_dl = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=pin
+        train_ds, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, pin_memory=pin,
+        sampler=RandomSubsetSampler(len(train_ds), subset_size)
     )
     test_dl = DataLoader(
         test_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=pin
+        num_workers=num_workers, pin_memory=pin,
+        sampler=RandomSubsetSampler(len(test_ds), subset_size)
     )
     return train_dl, test_dl
 
@@ -80,6 +84,7 @@ def main() -> None:
     p_train.add_argument("--input-h", type=int, default=512)
     p_train.add_argument("--input-w", type=int, default=512)
     p_train.add_argument("--out", type=str, default="checkpoints/model_last.pth")
+    p_train.add_argument("--subset-size", type=int, default=64, help="Random sample subset size")
     p_train.add_argument("--attention", type=str, default="none", choices=["none", "se", "cbam"])
 
     # Resume training from checkpoint
@@ -92,6 +97,7 @@ def main() -> None:
     p_resume.add_argument("--input-h", type=int, default=512)
     p_resume.add_argument("--input-w", type=int, default=512)
     p_resume.add_argument("--out", type=str, default="checkpoints/model_last.pth")
+    p_resume.add_argument("--subset-size", type=int, default=64, help="Random sample subset size")
     p_resume.add_argument("--strict", action="store_true", help="Strict checkpoint loading")
     p_resume.add_argument("--attention", type=str, default="none", choices=["none", "se", "cbam"])
 
@@ -103,8 +109,9 @@ def main() -> None:
     p_test.add_argument("--num-workers", type=int, default=4)
     p_test.add_argument("--input-h", type=int, default=512)
     p_test.add_argument("--input-w", type=int, default=512)
-    p_test.add_argument("--thr", type=float, default=0.5, help="Threshold for IoU binarization")
     p_test.add_argument("--attention", type=str, default="none", choices=["none", "se", "cbam"])
+    p_test.add_argument("--subset-size", type=int, default=64, help="Random sample subset size")
+    p_test.add_argument("--strict", action="store_true", help="Strict checkpoint loading")
 
     args = parser.parse_args()
 
@@ -112,12 +119,13 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Build loaders when needed
-    if args.command in ("train", "resume", "test"):
+    if args.command in ("train", "resume"):
         train_dl, test_dl = build_loaders(
             dataset_root=args.data,
             input_hw=input_hw,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
+            subset_size=args.subset_size
         )
 
     # Train from scratch
@@ -170,7 +178,9 @@ def main() -> None:
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             input_hw=input_hw,
-            threshold=args.thr,
+            attention=args.attention,
+            subset_size=args.subset_size,
+            strict=args.strict,
         )
 
         return
