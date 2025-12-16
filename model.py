@@ -360,9 +360,9 @@ class CCPDDataset(Dataset):
 # =====================
 
 class ConvBlock(nn.Module):
-    """(Conv -> BN -> ReLU) x 2"""
+    """(Conv -> BN -> ReLU) x 2, optional CBAM attention at the end."""
 
-    def __init__(self, in_ch: int, out_ch: int) -> None:
+    def __init__(self, in_ch: int, out_ch: int, use_cbam: bool = False) -> None:
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
@@ -372,93 +372,151 @@ class ConvBlock(nn.Module):
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
         )
+        self.attn = CBAM(out_ch) if use_cbam else nn.Identity()
 
-    def forward(self, x):
-        return self.block(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.block(x)
+        return self.attn(x)
 
 
 class Down(nn.Module):
     """Downscale with maxpool then double conv"""
 
-    def __init__(self, in_ch: int, out_ch: int) -> None:
+    def __init__(self, in_ch: int, out_ch: int, use_cbam: bool = False) -> None:
         super().__init__()
         self.pool = nn.MaxPool2d(2)
-        self.conv = ConvBlock(in_ch, out_ch)
+        self.conv = ConvBlock(in_ch, out_ch, use_cbam=use_cbam)
 
-    def forward(self, x):
-        x = self.pool(x)
-        return self.conv(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.conv(self.pool(x))
 
 
 class Up(nn.Module):
     """Upscale then double conv. Uses transposed conv for upsampling."""
 
-    def __init__(self, in_ch: int, out_ch: int) -> None:
+    def __init__(self, in_ch: int, out_ch: int, use_cbam: bool = False) -> None:
         super().__init__()
         self.up = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
-        self.conv = ConvBlock(in_ch, out_ch)  # in_ch = skip(ch) + up(ch)
+        self.conv = ConvBlock(in_ch, out_ch, use_cbam=use_cbam)
 
-    def forward(self, x, skip):
+    def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
         x = self.up(x)
 
-        # pad if needed (handles odd dims)
         diff_y = skip.size(-2) - x.size(-2)
         diff_x = skip.size(-1) - x.size(-1)
+        x = F.pad(x, [diff_x // 2, diff_x - diff_x // 2, diff_y // 2, diff_y - diff_y // 2])
 
-        x = F.pad(
-            x, [diff_x // 2, diff_x - diff_x // 2, diff_y // 2, diff_y - diff_y // 2]
-        )
         x = torch.cat([skip, x], dim=1)
-
         return self.conv(x)
+
+
+class CBAM(nn.Module):
+    """
+    Convolutional Block Attention Module (CBAM):
+    - Channel attention (avg/max pool -> MLP)
+    - Spatial attention (avg/max across channels -> conv)
+    """
+    def __init__(self, channels: int, reduction: int = 16, spatial_kernel: int = 7) -> None:
+        super().__init__()
+        hidden = max(channels // reduction, 4)
+
+        # Channel attention
+        self.mlp = nn.Sequential(
+            nn.Conv2d(channels, hidden, kernel_size=1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden, channels, kernel_size=1, bias=False),
+        )
+
+        # Spatial attention
+        self.spatial = nn.Conv2d(2, 1, kernel_size=spatial_kernel, padding=spatial_kernel // 2, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Channel attention
+        avg = torch.mean(x, dim=(2, 3), keepdim=True)
+        mx, _ = torch.max(x, dim=2, keepdim=True)
+        mx, _ = torch.max(mx, dim=3, keepdim=True)
+        ch_att = torch.sigmoid(self.mlp(avg) + self.mlp(mx))
+        x = x * ch_att
+
+        # Spatial attention
+        avg_c = torch.mean(x, dim=1, keepdim=True)
+        max_c, _ = torch.max(x, dim=1, keepdim=True)
+        sp = torch.cat([avg_c, max_c], dim=1)
+        sp_att = torch.sigmoid(self.spatial(sp))
+        return x * sp_att
+
+
+class DilatedConvBlock(nn.Module):
+    """
+    Slightly larger receptive field in the bottleneck via dilation.
+    """
+    def __init__(self, in_ch: int, out_ch: int) -> None:
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=2, dilation=2, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=4, dilation=4, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.block(x)
 
 
 class UNetSmall(nn.Module):
     """
-    Lightweight U-Net for binary segmentation (1 class: plate vs background).
+    Lightweight U-Net for binary segmentation (1 class: plate vs background):
+    - CBAM attention in encoder/decoder blocks
+    - Dilated bottleneck (larger receptive field)
+    - One FPN-style lateral fusion at the 1/4 scale (x2 -> y2)
+    
     Input: 3xHxW, Output: 1xHxW logits (use with BCEWithLogits).
     """
 
-    def __init__(self, in_ch: int = 3, base_ch: int = 32) -> None:
+    def __init__(self, in_ch: int = 3, base_ch: int = 32, use_cbam: bool = True) -> None:
         super().__init__()
 
         # Encoder
-        self.inc = ConvBlock(in_ch, base_ch)  # 3 -> 32
-        self.down1 = Down(base_ch, base_ch * 2)  # 32 -> 64
-        self.down2 = Down(base_ch * 2, base_ch * 4)  # 64 -> 128
-        self.down3 = Down(base_ch * 4, base_ch * 8)  # 128 -> 256
+        self.inc = ConvBlock(in_ch, base_ch, use_cbam=use_cbam)
+        self.down1 = Down(base_ch, base_ch * 2, use_cbam=use_cbam)
+        self.down2 = Down(base_ch * 2, base_ch * 4, use_cbam=use_cbam)
+        self.down3 = Down(base_ch * 4, base_ch * 8, use_cbam=use_cbam)
 
-        # Optional extra depth for larger model
-        # self.down4 = Down(base_ch * 8, base_ch * 16)
-
-        # Bottleneck
-        self.bottleneck = ConvBlock(base_ch * 8, base_ch * 16)
+        # Bottleneck (dilated)
+        self.bottleneck = DilatedConvBlock(base_ch * 8, base_ch * 16)
 
         # Decoder
-        self.up3 = Up(base_ch * 16, base_ch * 8)  # (256 + 256) -> 256
-        self.up2 = Up(base_ch * 8, base_ch * 4)  # (128 + 128) -> 128
-        self.up1 = Up(base_ch * 4, base_ch * 2)  # (64 + 64)   -> 64
-        self.up0 = Up(base_ch * 2, base_ch)  # (32 + 32)   -> 32
+        self.up3 = Up(base_ch * 16, base_ch * 8, use_cbam=use_cbam)
+        self.up2 = Up(base_ch * 8, base_ch * 4, use_cbam=use_cbam)
+        self.up1 = Up(base_ch * 4, base_ch * 2, use_cbam=use_cbam)
+        self.up0 = Up(base_ch * 2, base_ch, use_cbam=use_cbam)
+
+        # FPN-style lateral fusion at 1/4 scale (x2)
+        self.lat_x2 = nn.Conv2d(base_ch * 4, base_ch * 4, kernel_size=1, bias=False)
 
         # Head
         self.outc = nn.Conv2d(base_ch, 1, kernel_size=1)
 
-    def forward(self, x):
-        x0 = self.inc(x)  # H
-        x1 = self.down1(x0)  # H/2
-        x2 = self.down2(x1)  # H/4
-        x3 = self.down3(x2)  # H/8
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x0 = self.inc(x)         # H
+        x1 = self.down1(x0)      # H/2
+        x2 = self.down2(x1)      # H/4
+        x3 = self.down3(x2)      # H/8
 
-        xb = self.bottleneck(x3)
+        xb = self.bottleneck(x3) # H/8
 
-        y3 = self.up3(xb, x3)
-        y2 = self.up2(y3, x2)
-        y1 = self.up1(y2, x1)
-        y0 = self.up0(y1, x0)
+        y3 = self.up3(xb, x3)    # H/8
+        y2 = self.up2(y3, x2)    # H/4
 
-        logits = self.outc(y0)  # raw logits
+        # FPN-style lateral fusion: inject refined encoder features at same scale
+        y2 = y2 + self.lat_x2(x2)
 
-        return logits
+        y1 = self.up1(y2, x1)    # H/2
+        y0 = self.up0(y1, x0)    # H
+
+        return self.outc(y0)
 
 
 # ==================================
@@ -534,8 +592,9 @@ def iou_score(
 
 def create_model(
     device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu",
+    use_cbam: bool = False
 ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.device]:
-    model = UNetSmall(in_ch=3, base_ch=32).to(device)
+    model = UNetSmall(in_ch=3, base_ch=32, use_cbam=use_cbam).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
     return model, optimizer, device
 
