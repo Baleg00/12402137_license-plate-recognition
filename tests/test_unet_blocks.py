@@ -7,7 +7,7 @@ from UNet import Down, Up, ConvBlock, SEBlock, CBAM, DilatedConvBlock, UNetSmall
 @pytest.mark.parametrize("B,C,H,W", [(2, 3, 128, 128), (1, 3, 127, 255)])
 def test_convblock_shape(B: int, C: int, H: int, W: int) -> None:
     x = torch.randn(B, C, H, W)
-    block = ConvBlock(in_ch=C, out_ch=32)  # baseline signature
+    block = ConvBlock(in_ch=C, out_ch=32)
     y = block(x)
     assert y.shape == (B, 32, H, W)
 
@@ -18,7 +18,6 @@ def test_down_halves_spatial(B: int, C: int, H: int, W: int) -> None:
     down = Down(in_ch=C, out_ch=64)
     y = down(x)
 
-    # MaxPool2d(2) uses floor division for odd sizes
     assert y.shape[0] == B
     assert y.shape[1] == 64
     assert y.shape[2] == H // 2
@@ -41,11 +40,8 @@ def test_up_matches_skip_resolution(
     Up(x, skip) should return a feature map at the skip's spatial resolution.
     x is expected to be half-resolution of skip (roughly), but may differ by 1 due to odd dims.
     """
-    # create skip at target resolution
     skip = torch.randn(B, skip_ch, Hs, Ws)
 
-    # create x at "bottleneck" resolution ~ half, and with in_ch channels
-    # After ConvTranspose2d (stride=2), this will be ~ 2*Hx x 2*Wx; padding should align to skip.
     x = torch.randn(B, in_ch, max(1, Hs // 2), max(1, Ws // 2))
 
     up = Up(in_ch=in_ch, out_ch=out_ch)
@@ -59,13 +55,6 @@ def test_up_matches_skip_resolution(
 
 @pytest.mark.parametrize("attention", ["none", "se", "cbam"])
 def test_attention_blocks_preserve_shape(attention: str) -> None:
-    """
-    If your code supports attention selection in ConvBlock (attention='none'|'se'|'cbam'),
-    this test verifies shape preservation. If not, it will be skipped.
-    """
-    if "attention" not in ConvBlock.__init__.__code__.co_varnames:
-        pytest.skip("ConvBlock does not support attention selection in this version.")
-
     x = torch.randn(2, 16, 64, 64)
     block = ConvBlock(in_ch=16, out_ch=32, attention=attention)
     y = block(x)

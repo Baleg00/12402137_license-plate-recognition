@@ -1,15 +1,3 @@
-"""
-Evaluate a segmentation checkpoint on a single image and visualize the result.
-
-Usage example:
-  python eval_one_image.py
-    --ckpt checkpoints/best_cbam.pth
-    --image /path/to/img.jpg
-    --attention cbam
-    --input-h 512
-    --input-w 512
-"""
-
 import argparse
 from pathlib import Path
 
@@ -24,29 +12,37 @@ from helpers import letterbox_rgb, unletterbox_mask, overlay_mask
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", required=True, type=str, help="Checkpoint path (.pth/.pt)")
-    ap.add_argument("--image", required=True, type=str, help="Path to input image (.jpg/.png)")
-    ap.add_argument("--attention", type=str, default="none", choices=["none", "se", "cbam"])
-    ap.add_argument("--base-ch", type=int, default=32, help="Base channels used during training")
+    ap.add_argument(
+        "--ckpt", required=True, type=str, help="Checkpoint path (.pth/.pt)"
+    )
+    ap.add_argument(
+        "--image", required=True, type=str, help="Path to input image (.jpg/.png)"
+    )
+    ap.add_argument(
+        "--attention", type=str, default="none", choices=["none", "se", "cbam"]
+    )
+    ap.add_argument(
+        "--base-ch", type=int, default=32, help="Base channels used during training"
+    )
     ap.add_argument("--input-h", type=int, default=512)
     ap.add_argument("--input-w", type=int, default=512)
-    ap.add_argument("--thr", type=float, default=0.5, help="Mask threshold on sigmoid(logits)")
+    ap.add_argument(
+        "--thr", type=float, default=0.5, help="Mask threshold on sigmoid(logits)"
+    )
     ap.add_argument("--strict", action="store_true", help="Strict load_state_dict")
     args = ap.parse_args()
-    
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Load image
     img_path = Path(args.image)
     bgr = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
-    
+
     if bgr is None:
         raise FileNotFoundError(f"Could not read image: {img_path}")
-    
+
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     oh, ow = rgb.shape[:2]
 
-    # Letterbox to training size
     target_hw = (args.input_h, args.input_w)
     rgb_lb, meta = letterbox_rgb(rgb, target_hw=target_hw)
 
@@ -58,22 +54,17 @@ def main() -> None:
     x = np.transpose(x, (2, 0, 1))  # CHW
     x_t = torch.from_numpy(x).unsqueeze(0).to(device)  # [1,3,H,W]
 
-    # Instantiate model and load checkpoint
-    
     model, _, device = create_model(attention=args.attention)
     model = load_model(model, args.ckpt, device, args.strict)
     model.eval()
 
-    # Inference
     with torch.no_grad():
         logits = model(x_t)
         probs = torch.sigmoid(logits)[0, 0].detach().cpu().numpy()
         pred = (probs >= args.thr).astype(np.uint8)
 
-    # Map prediction back to original image size
     pred_orig = unletterbox_mask(pred, (oh, ow), meta)
 
-    # Build visualizations
     overlay = overlay_mask(rgb, pred_orig, alpha=0.45)
 
     # Plate crop preview
@@ -87,7 +78,6 @@ def main() -> None:
         x1, x2 = max(0, x1 - pad), min(ow, x2 + pad)
         crop_vis = rgb[y1:y2, x1:x2]
 
-    # Display
     plt.figure(figsize=(14, 5))
     plt.subplot(1, 3, 1)
     plt.title("Input")

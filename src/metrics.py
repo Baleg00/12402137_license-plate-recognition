@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
 
+
 # ==================================
 # Loss & Simple Metrics (Dice + BCE)
 # ==================================
+
 
 class DiceLoss(nn.Module):
     """Soft Dice loss for binary segmentation."""
@@ -19,4 +21,3 @@ class DiceLoss(nn.Module):
         den = (probs.pow(2) + targets.pow(2)).sum(dim=(2, 3)) + self.eps
         dice = 1.0 - (num / den)
         return dice.mean()
-    

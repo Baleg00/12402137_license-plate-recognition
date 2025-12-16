@@ -13,14 +13,20 @@ from pathlib import Path
 
 from CCPD import CCPDDataset
 from helpers import get_train_transform, get_val_transform
-from UNet import UNetSmall
-from training import train_one_epoch, validate, load_model, test_checkpoint, create_model
+from training import (
+    train_one_epoch,
+    validate,
+    load_model,
+    test_checkpoint,
+    create_model,
+)
 from sampler import RandomSubsetSampler
 
 
 # =============
 # Main Function
 # =============
+
 
 def build_loaders(
     dataset_root: str | Path,
@@ -44,14 +50,20 @@ def build_loaders(
 
     pin = torch.cuda.is_available()
     train_dl = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=pin,
-        sampler=RandomSubsetSampler(len(train_ds), subset_size)
+        train_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin,
+        sampler=RandomSubsetSampler(len(train_ds), subset_size),
     )
     test_dl = DataLoader(
-        test_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=pin,
-        sampler=RandomSubsetSampler(len(test_ds), subset_size)
+        test_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin,
+        sampler=RandomSubsetSampler(len(test_ds), subset_size),
     )
     return train_dl, test_dl
 
@@ -60,18 +72,24 @@ def save_checkpoint(
     path: str | Path,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
-    epoch: int
+    epoch: int,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
-        {"state_dict": model.state_dict(), "optimizer": optimizer.state_dict(), "epoch": epoch},
-        path
+        {
+            "state_dict": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "epoch": epoch,
+        },
+        path,
     )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="CCPD plate segmentation training/testing CLI")
+    parser = argparse.ArgumentParser(
+        description="CCPD plate segmentation training/testing CLI"
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -84,34 +102,56 @@ def main() -> None:
     p_train.add_argument("--input-h", type=int, default=512)
     p_train.add_argument("--input-w", type=int, default=512)
     p_train.add_argument("--out", type=str, default="checkpoints/model_last.pth")
-    p_train.add_argument("--subset-size", type=int, default=64, help="Random sample subset size")
-    p_train.add_argument("--attention", type=str, default="none", choices=["none", "se", "cbam"])
+    p_train.add_argument(
+        "--subset-size", type=int, default=64, help="Random sample subset size"
+    )
+    p_train.add_argument(
+        "--attention", type=str, default="none", choices=["none", "se", "cbam"]
+    )
 
     # Resume training from checkpoint
     p_resume = sub.add_parser("resume", help="Load a checkpoint and continue training")
     p_resume.add_argument("--data", required=True, type=str, help="Dataset root (CCPD)")
-    p_resume.add_argument("--ckpt", required=True, type=str, help="Checkpoint path (.pth/.pt)")
-    p_resume.add_argument("--epochs", type=int, default=20, help="Total epochs to train (not additional)")
+    p_resume.add_argument(
+        "--ckpt", required=True, type=str, help="Checkpoint path (.pth/.pt)"
+    )
+    p_resume.add_argument(
+        "--epochs", type=int, default=20, help="Total epochs to train (not additional)"
+    )
     p_resume.add_argument("--batch-size", type=int, default=8)
     p_resume.add_argument("--num-workers", type=int, default=4)
     p_resume.add_argument("--input-h", type=int, default=512)
     p_resume.add_argument("--input-w", type=int, default=512)
     p_resume.add_argument("--out", type=str, default="checkpoints/model_last.pth")
-    p_resume.add_argument("--subset-size", type=int, default=64, help="Random sample subset size")
-    p_resume.add_argument("--strict", action="store_true", help="Strict checkpoint loading")
-    p_resume.add_argument("--attention", type=str, default="none", choices=["none", "se", "cbam"])
+    p_resume.add_argument(
+        "--subset-size", type=int, default=64, help="Random sample subset size"
+    )
+    p_resume.add_argument(
+        "--strict", action="store_true", help="Strict checkpoint loading"
+    )
+    p_resume.add_argument(
+        "--attention", type=str, default="none", choices=["none", "se", "cbam"]
+    )
 
     # Test checkpoint
     p_test = sub.add_parser("test", help="Evaluate a checkpoint on the test split")
     p_test.add_argument("--data", required=True, type=str, help="Dataset root (CCPD)")
-    p_test.add_argument("--ckpt", required=True, type=str, help="Checkpoint path (.pth/.pt)")
+    p_test.add_argument(
+        "--ckpt", required=True, type=str, help="Checkpoint path (.pth/.pt)"
+    )
     p_test.add_argument("--batch-size", type=int, default=8)
     p_test.add_argument("--num-workers", type=int, default=4)
     p_test.add_argument("--input-h", type=int, default=512)
     p_test.add_argument("--input-w", type=int, default=512)
-    p_test.add_argument("--attention", type=str, default="none", choices=["none", "se", "cbam"])
-    p_test.add_argument("--subset-size", type=int, default=64, help="Random sample subset size")
-    p_test.add_argument("--strict", action="store_true", help="Strict checkpoint loading")
+    p_test.add_argument(
+        "--attention", type=str, default="none", choices=["none", "se", "cbam"]
+    )
+    p_test.add_argument(
+        "--subset-size", type=int, default=64, help="Random sample subset size"
+    )
+    p_test.add_argument(
+        "--strict", action="store_true", help="Strict checkpoint loading"
+    )
 
     args = parser.parse_args()
 
@@ -125,7 +165,7 @@ def main() -> None:
             input_hw=input_hw,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
-            subset_size=args.subset_size
+            subset_size=args.subset_size,
         )
 
     # Train from scratch
@@ -135,7 +175,9 @@ def main() -> None:
         for epoch in range(args.epochs):
             train_loss = train_one_epoch(model, train_dl, optim, device)
             test_loss, test_iou, _ = validate(model, test_dl, device)
-            print(f"Epoch {epoch:02d} | train {train_loss:.4f} | test {test_loss:.4f} | IoU {test_iou:.4f}")
+            print(
+                f"Epoch {epoch:02d} | train {train_loss:.4f} | test {test_loss:.4f} | IoU {test_iou:.4f}"
+            )
 
             save_checkpoint(args.out, model, optim, epoch)
 
@@ -154,14 +196,18 @@ def main() -> None:
                 try:
                     optim.load_state_dict(ckpt["optimizer"])
                 except Exception:
-                    print("Warning: could not load optimizer state (continuing with fresh optimizer).")
+                    print(
+                        "Warning: could not load optimizer state (continuing with fresh optimizer)."
+                    )
             if "epoch" in ckpt:
                 start_epoch = int(ckpt["epoch"]) + 1
 
         for epoch in range(start_epoch, args.epochs):
             train_loss = train_one_epoch(model, train_dl, optim, device)
             test_loss, test_iou, _ = validate(model, test_dl, device)
-            print(f"Epoch {epoch:02d} | train {train_loss:.4f} | test {test_loss:.4f} | IoU {test_iou:.4f}")
+            print(
+                f"Epoch {epoch:02d} | train {train_loss:.4f} | test {test_loss:.4f} | IoU {test_iou:.4f}"
+            )
 
             save_checkpoint(args.out, model, optim, epoch)
 

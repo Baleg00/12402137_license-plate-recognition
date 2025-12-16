@@ -14,13 +14,20 @@ import easyocr
 
 from tqdm import tqdm
 
-from helpers import letterbox_rgb, unletterbox_mask, overlay_mask, IMAGENET_MEAN, IMAGENET_STD
+from helpers import (
+    letterbox_rgb,
+    unletterbox_mask,
+    overlay_mask,
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+)
 from training import create_model, load_model
 
 
 # ================================
 # Utilities (pre / postprocessing)
 # ================================
+
 
 def to_model_tensor(rgb_lb: np.ndarray) -> torch.Tensor:
     """RGB uint8 -> normalized float tensor [1,3,H,W]."""
@@ -36,7 +43,7 @@ def largest_component(mask01: np.ndarray) -> np.ndarray:
     num, labels, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
     if num <= 1:
         return m
-    
+
     largest = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
     return (labels == largest).astype(np.uint8)
 
@@ -49,11 +56,11 @@ def mask_to_minarearect(mask01: np.ndarray) -> Optional[np.ndarray]:
     cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not cnts:
         return None
-    
+
     contour = max(cnts, key=cv2.contourArea)
     if cv2.contourArea(contour) < 20:  # tiny noise
         return None
-    
+
     rect = cv2.minAreaRect(contour)
     box = cv2.boxPoints(rect).astype(np.float32)
     return box
@@ -70,7 +77,9 @@ def order_pts(pts: np.ndarray) -> np.ndarray:
     return np.array([tl, tr, br, bl], dtype=np.float32)
 
 
-def rectify_and_crop_plate(img_bgr: np.ndarray, mask: np.ndarray) -> Optional[np.ndarray]:
+def rectify_and_crop_plate(
+    img_bgr: np.ndarray, mask: np.ndarray
+) -> Optional[np.ndarray]:
     """
     Perspective-rectify using minAreaRect from mask, then return BGR crop.
     """
@@ -83,7 +92,10 @@ def rectify_and_crop_plate(img_bgr: np.ndarray, mask: np.ndarray) -> Optional[np
     height = int(max(np.linalg.norm(box[3] - box[0]), np.linalg.norm(box[2] - box[1])))
     width, height = max(width, 1), max(height, 1)
 
-    dst = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype=np.float32)
+    dst = np.array(
+        [[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]],
+        dtype=np.float32,
+    )
     M = cv2.getPerspectiveTransform(box, dst)
     warp = cv2.warpPerspective(img_bgr, M, (width, height), flags=cv2.INTER_CUBIC)
     return warp
@@ -129,22 +141,24 @@ def parse_gt_from_stem(stem: str) -> str:
     """Extract ground-truth plate text from filename stem."""
     ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZO"
     ALNUM = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789O"
-    
+
     fields = stem.split("-")
     if len(fields) != 7:
         return None
-    
+
     plate_indices = list(map(int, fields[4].split("_")))
     if len(fields) != 7:
         return None
-    
+
     # ignore first index because it is always a chinese character
-    plate = ALPHA[plate_indices[1]] + "".join(map(lambda i: ALNUM[i], plate_indices[2:]))
-    
+    plate = ALPHA[plate_indices[1]] + "".join(
+        map(lambda i: ALNUM[i], plate_indices[2:])
+    )
+
     # According to the CCPD documentation: We use O as a sign of "no character"
     # because there is no O in Chinese license plate characters.
     plate.replace("O", "")
-    
+
     return plate
 
 
@@ -152,32 +166,33 @@ def levenshtein(a: str, b: str) -> int:
     """Classic DP Levenshtein distance."""
     if a == b:
         return 0
-    
+
     if len(a) == 0:
         return len(b)
-    
+
     if len(b) == 0:
         return len(a)
-    
+
     prev = list(range(len(b) + 1))
-    
+
     for i, ca in enumerate(a, start=1):
         cur = [i]
-    
+
         for j, cb in enumerate(b, start=1):
             ins = cur[j - 1] + 1
             dele = prev[j] + 1
             sub = prev[j - 1] + (ca != cb)
             cur.append(min(ins, dele, sub))
-    
+
         prev = cur
-    
+
     return prev[-1]
 
 
 # ==============================================
 # Core pipeline: segment -> crop -> OCR -> score
 # ==============================================
+
 
 @torch.no_grad()
 def predict_mask(
@@ -236,11 +251,15 @@ def run_end_to_end_ocr_eval(
     dataset_root = Path(dataset_root)
     split_path = dataset_root / "splits" / split_txt
 
-    images = [(Path(line), Path(line).stem) for line in split_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    
+    images = [
+        (Path(line), Path(line).stem)
+        for line in split_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
     if shuffle:
         random.shuffle(images)
-    
+
     if max_images is not None:
         images = images[:max_images]
 
@@ -293,7 +312,7 @@ def run_end_to_end_ocr_eval(
 
         # scoring
         n_total += 1
-        is_em = (pred == gt)
+        is_em = pred == gt
         exact_match += int(is_em)
 
         # debug visualization
@@ -341,6 +360,7 @@ def run_end_to_end_ocr_eval(
 # Debug Visualization
 # ===================
 
+
 def show_debug_visualization(
     img_bgr: np.ndarray,
     mask: np.ndarray,
@@ -375,7 +395,11 @@ def show_debug_visualization(
     plt.axis("off")
 
     plt.subplot(2, 3, 4)
-    plt.title("Rectified plate crop" if plate_bgr is not None else "Rectified plate crop (None)")
+    plt.title(
+        "Rectified plate crop"
+        if plate_bgr is not None
+        else "Rectified plate crop (None)"
+    )
     if plate_bgr is not None:
         plt.imshow(cv2.cvtColor(plate_bgr, cv2.COLOR_BGR2RGB))
     plt.axis("off")
@@ -394,21 +418,45 @@ def show_debug_visualization(
 # Main Function
 # =============
 
+
 def main():
-    ap = argparse.ArgumentParser(description="End-to-end OCR evaluation: segmentation -> crop -> EasyOCR -> compare to GT from stem")
+    ap = argparse.ArgumentParser(
+        description="End-to-end OCR evaluation: segmentation -> crop -> EasyOCR -> compare to GT from stem"
+    )
 
     ap.add_argument("--data", required=True, type=str, help="Dataset root (CCPD)")
-    ap.add_argument("--ckpt", required=True, type=str, help="Segmentation checkpoint (.pth/.pt)")
-    ap.add_argument("--split", default="test.txt", choices=["train.txt", "test.txt", "val.txt"], help="Which split to evaluate")
-    ap.add_argument("--attention", default="none", choices=["none", "se", "cbam"], help="Model variant used for the checkpoint (must match training)")
+    ap.add_argument(
+        "--ckpt", required=True, type=str, help="Segmentation checkpoint (.pth/.pt)"
+    )
+    ap.add_argument(
+        "--split",
+        default="test.txt",
+        choices=["train.txt", "test.txt", "val.txt"],
+        help="Which split to evaluate",
+    )
+    ap.add_argument(
+        "--attention",
+        default="none",
+        choices=["none", "se", "cbam"],
+        help="Model variant used for the checkpoint (must match training)",
+    )
     ap.add_argument("--input-h", type=int, default=512)
     ap.add_argument("--input-w", type=int, default=512)
-    ap.add_argument("--seg-thr", type=float, default=0.5, help="Segmentation threshold on sigmoid(logits)")
+    ap.add_argument(
+        "--seg-thr",
+        type=float,
+        default=0.5,
+        help="Segmentation threshold on sigmoid(logits)",
+    )
     ap.add_argument("--langs", nargs="+", default=["en"], help="EasyOCR languages")
     ap.add_argument("--shuffle", action="store_true", help="Shuffle images")
-    ap.add_argument("--max-images", type=int, default=None, help="Limit number of images")
+    ap.add_argument(
+        "--max-images", type=int, default=None, help="Limit number of images"
+    )
     ap.add_argument("--strict", action="store_true", help="Strict checkpoint loading")
-    ap.add_argument("--show", action="store_true", help="Show debug visualizations per image")
+    ap.add_argument(
+        "--show", action="store_true", help="Show debug visualizations per image"
+    )
 
     args = ap.parse_args()
 

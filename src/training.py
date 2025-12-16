@@ -18,6 +18,7 @@ from sampler import RandomSubsetSampler
 # Training Functions
 # ==================
 
+
 def bce_dice_loss(
     logits: torch.Tensor, targets: torch.Tensor, bce_weight: float = 0.5
 ) -> torch.Tensor:
@@ -40,7 +41,7 @@ def iou_score(
 
 def create_model(
     device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu",
-    attention: Literal["none", "se", "cbam"] = "none"
+    attention: Literal["none", "se", "cbam"] = "none",
 ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.device]:
     model = UNetSmall(in_ch=3, base_ch=32, attention=attention).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
@@ -71,7 +72,6 @@ def load_model(
     else:
         device = torch.device(device)
 
-    # Load checkpoint to CPU first (safe and portable)
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
 
     # Support both raw state_dict and wrapped checkpoints

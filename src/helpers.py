@@ -9,6 +9,7 @@ from albumentations.pytorch import ToTensorV2
 # Helper Functions
 # ================
 
+
 def letterbox(img, mask, target_hw=(512, 512), border_value=(114, 114, 114)):
     """
     Letterbox/pad image to target size.
@@ -31,7 +32,6 @@ def letterbox(img, mask, target_hw=(512, 512), border_value=(114, 114, 114)):
         mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST
     )
 
-    # pad to target size
     top = (target_height - new_height) // 2
     bottom = target_height - new_height - top
     left = (target_width - new_width) // 2
@@ -46,7 +46,9 @@ def letterbox(img, mask, target_hw=(512, 512), border_value=(114, 114, 114)):
     return img_padded, mask_padded
 
 
-def letterbox_rgb(img_rgb: np.ndarray, target_hw: tuple[int, int]) -> tuple[np.ndarray, tuple[float, int, int]]:
+def letterbox_rgb(
+    img_rgb: np.ndarray, target_hw: tuple[int, int]
+) -> tuple[np.ndarray, tuple[float, int, int]]:
     """
     Resize with unchanged aspect ratio and pad to target_hw (H,W).
     Returns padded image and (scale, pad_left, pad_top) for unletterboxing.
@@ -57,7 +59,9 @@ def letterbox_rgb(img_rgb: np.ndarray, target_hw: tuple[int, int]) -> tuple[np.n
     scale = min(target_width / width, target_height / height)
     new_width, new_height = int(round(width * scale)), int(round(height * scale))
 
-    resized = cv2.resize(img_rgb, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+    resized = cv2.resize(
+        img_rgb, (new_width, new_height), interpolation=cv2.INTER_LINEAR
+    )
 
     pad_left = (target_width - new_width) // 2
     pad_right = target_width - new_width - pad_left
@@ -65,13 +69,20 @@ def letterbox_rgb(img_rgb: np.ndarray, target_hw: tuple[int, int]) -> tuple[np.n
     pad_bottom = target_height - new_height - pad_top
 
     padded = cv2.copyMakeBorder(
-        resized, pad_top, pad_bottom, pad_left, pad_right,
-        borderType=cv2.BORDER_CONSTANT, value=(114, 114, 114)
+        resized,
+        pad_top,
+        pad_bottom,
+        pad_left,
+        pad_right,
+        borderType=cv2.BORDER_CONSTANT,
+        value=(114, 114, 114),
     )
     return padded, (scale, pad_left, pad_top)
 
 
-def unletterbox_mask(mask_hw: np.ndarray, original_hw: tuple[int, int], meta: tuple[float, int, int]) -> np.ndarray:
+def unletterbox_mask(
+    mask_hw: np.ndarray, original_hw: tuple[int, int], meta: tuple[float, int, int]
+) -> np.ndarray:
     """
     Undo letterbox on a predicted mask:
     - crop padding
@@ -83,13 +94,17 @@ def unletterbox_mask(mask_hw: np.ndarray, original_hw: tuple[int, int], meta: tu
     new_width = int(round(original_width * scale))
     new_height = int(round(original_height * scale))
 
-    cropped = mask_hw[pad_top:pad_top + new_height, pad_left:pad_left + new_width]
+    cropped = mask_hw[pad_top : pad_top + new_height, pad_left : pad_left + new_width]
 
-    out = cv2.resize(cropped, (original_width, original_height), interpolation=cv2.INTER_NEAREST)
+    out = cv2.resize(
+        cropped, (original_width, original_height), interpolation=cv2.INTER_NEAREST
+    )
     return out
 
 
-def overlay_mask(img_rgb: np.ndarray, mask: np.ndarray, alpha: float = 0.45) -> np.ndarray:
+def overlay_mask(
+    img_rgb: np.ndarray, mask: np.ndarray, alpha: float = 0.45
+) -> np.ndarray:
     """
     Create an overlay highlighting mask region (red) on the RGB image.
     mask must be HxW with values {0,1}.

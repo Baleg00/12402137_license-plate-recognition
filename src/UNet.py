@@ -9,16 +9,15 @@ from typing import Literal
 # U-Net Building Blocks
 # =====================
 
+
 class ConvBlock(nn.Module):
     """
     (Conv -> BN -> ReLU) x 2 + optional attention
     attention: "none" | "se" | "cbam"
     """
+
     def __init__(
-        self,
-        in_ch: int,
-        out_ch: int,
-        attention: Literal["none", "se", "cbam"] = "none"
+        self, in_ch: int, out_ch: int, attention: Literal["none", "se", "cbam"] = "none"
     ) -> None:
         super().__init__()
         self.block = nn.Sequential(
@@ -44,7 +43,10 @@ class ConvBlock(nn.Module):
 
 class Down(nn.Module):
     """Downscale with maxpool then double conv"""
-    def __init__(self, in_ch: int, out_ch: int, attention: Literal["none", "se", "cbam"] = "none") -> None:
+
+    def __init__(
+        self, in_ch: int, out_ch: int, attention: Literal["none", "se", "cbam"] = "none"
+    ) -> None:
         super().__init__()
         self.pool = nn.MaxPool2d(2)
         self.conv = ConvBlock(in_ch, out_ch, attention=attention)
@@ -55,7 +57,10 @@ class Down(nn.Module):
 
 class Up(nn.Module):
     """Upscale then double conv. Uses transposed conv for upsampling."""
-    def __init__(self, in_ch: int, out_ch: int, attention: Literal["none", "se", "cbam"] = "none") -> None:
+
+    def __init__(
+        self, in_ch: int, out_ch: int, attention: Literal["none", "se", "cbam"] = "none"
+    ) -> None:
         super().__init__()
         self.up = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
         self.conv = ConvBlock(in_ch, out_ch, attention=attention)
@@ -65,8 +70,9 @@ class Up(nn.Module):
 
         diff_y = skip.size(-2) - x.size(-2)
         diff_x = skip.size(-1) - x.size(-1)
-        x = F.pad(x, [diff_x // 2, diff_x - diff_x // 2,
-                      diff_y // 2, diff_y - diff_y // 2])
+        x = F.pad(
+            x, [diff_x // 2, diff_x - diff_x // 2, diff_y // 2, diff_y - diff_y // 2]
+        )
 
         x = torch.cat([skip, x], dim=1)
         return self.conv(x)
@@ -77,6 +83,7 @@ class SEBlock(nn.Module):
     Squeeze-and-Excitation (SE) block:
     - Channel-wise attention via global average pooling
     """
+
     def __init__(self, channels: int, reduction: int = 16) -> None:
         super().__init__()
         hidden = max(channels // reduction, 4)
@@ -99,7 +106,10 @@ class CBAM(nn.Module):
     - Channel attention (avg/max pool -> MLP)
     - Spatial attention (avg/max across channels -> conv)
     """
-    def __init__(self, channels: int, reduction: int = 16, spatial_kernel: int = 7) -> None:
+
+    def __init__(
+        self, channels: int, reduction: int = 16, spatial_kernel: int = 7
+    ) -> None:
         super().__init__()
         hidden = max(channels // reduction, 4)
 
@@ -111,7 +121,9 @@ class CBAM(nn.Module):
         )
 
         # Spatial attention
-        self.spatial = nn.Conv2d(2, 1, kernel_size=spatial_kernel, padding=spatial_kernel // 2, bias=False)
+        self.spatial = nn.Conv2d(
+            2, 1, kernel_size=spatial_kernel, padding=spatial_kernel // 2, bias=False
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Channel attention
@@ -133,6 +145,7 @@ class DilatedConvBlock(nn.Module):
     """
     Slightly larger receptive field in the bottleneck via dilation.
     """
+
     def __init__(self, in_ch: int, out_ch: int) -> None:
         super().__init__()
         self.block = nn.Sequential(
@@ -155,7 +168,7 @@ class UNetSmall(nn.Module):
     - SE attention in encoder/decoder blocks
     - Dilated bottleneck (larger receptive field)
     - One FPN-style lateral fusion at the 1/4 scale (x2 -> y2)
-    
+
     Input: 3xHxW, Output: 1xHxW logits (use with BCEWithLogits).
     """
 
@@ -189,21 +202,20 @@ class UNetSmall(nn.Module):
         self.outc = nn.Conv2d(base_ch, 1, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x0 = self.inc(x)         # H
-        x1 = self.down1(x0)      # H/2
-        x2 = self.down2(x1)      # H/4
-        x3 = self.down3(x2)      # H/8
+        x0 = self.inc(x)  # H
+        x1 = self.down1(x0)  # H/2
+        x2 = self.down2(x1)  # H/4
+        x3 = self.down3(x2)  # H/8
 
-        xb = self.bottleneck(x3) # H/8
+        xb = self.bottleneck(x3)  # H/8
 
-        y3 = self.up3(xb, x3)    # H/8
-        y2 = self.up2(y3, x2)    # H/4
+        y3 = self.up3(xb, x3)  # H/8
+        y2 = self.up2(y3, x2)  # H/4
 
         # FPN-style lateral fusion: inject refined encoder features at same scale
         y2 = y2 + self.lat_x2(x2)
 
-        y1 = self.up1(y2, x1)    # H/2
-        y0 = self.up0(y1, x0)    # H
+        y1 = self.up1(y2, x1)  # H/2
+        y0 = self.up0(y1, x0)  # H
 
         return self.outc(y0)
-    

@@ -8,11 +8,18 @@ from typing import Iterator, Optional
 # Random Subset Sampler
 # =====================
 
+
 class RandomSubsetSampler(Sampler[int]):
     """
     Samples a random subset of indices (without replacement) each time __iter__ is called.
     """
-    def __init__(self, dataset_len: int, subset_size: int, generator: Optional[torch.Generator] = None):
+
+    def __init__(
+        self,
+        dataset_len: int,
+        subset_size: int,
+        generator: Optional[torch.Generator] = None,
+    ):
         if subset_size <= 0:
             raise ValueError("subset_size must be > 0")
         if subset_size > dataset_len:

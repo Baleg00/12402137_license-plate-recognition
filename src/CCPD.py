@@ -11,6 +11,7 @@ from pathlib import Path
 # CCPD Dataset
 # ============
 
+
 class CCPDDataset(Dataset):
     def __init__(self, root, split_txt, transform=None):
         """
@@ -47,10 +48,8 @@ class CCPDDataset(Dataset):
         fields = stem.split("-")
         assert len(fields) == 7, f"Unexpected filename format: {name}"
 
-        # Area ratio
         area = float(fields[0])
 
-        # Tilt degrees
         tilt_h, tilt_v = map(float, fields[1].split("_"))
 
         # Bounding box: left-up & right-bottom
@@ -66,10 +65,8 @@ class CCPDDataset(Dataset):
             vertices.append([x, y])
         vertices = np.array(vertices, dtype=np.float32)
 
-        # License plate number (encoded indices)
         plate_indices = list(map(int, fields[4].split("_")))
 
-        # Brightness and blurriness
         brightness = int(fields[5])
         blurriness = int(fields[6])
 
@@ -88,7 +85,6 @@ class CCPDDataset(Dataset):
         img_path = self.root / rel_path
         stem = Path(rel_path).stem
 
-        # Read image (RGB)
         img_bgr = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
         if img_bgr is None:
             raise FileNotFoundError(f"Could not read image: {img_path}")
@@ -96,7 +92,6 @@ class CCPDDataset(Dataset):
 
         h, w = img.shape[:2]
 
-        # Parse annotations from filename
         ann = self._parse_filename(img_path.name)
 
         # Build binary mask from polygon (four vertices)
@@ -119,7 +114,6 @@ class CCPDDataset(Dataset):
 
             return img_out, mask_out, stem
 
-        # No transform: return numpy arrays
         img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         mask = mask[None, ...].astype(np.float32)
 

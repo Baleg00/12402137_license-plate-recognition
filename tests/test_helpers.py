@@ -12,6 +12,7 @@ from UNet import UNetSmall
 # Utilities
 # =========
 
+
 def _tmp_checkpoint_path(tmp_path: Path, name: str = "ckpt.pth") -> Path:
     p = tmp_path / name
     return p
@@ -20,6 +21,7 @@ def _tmp_checkpoint_path(tmp_path: Path, name: str = "ckpt.pth") -> Path:
 # ======================
 # Loss / metrics helpers
 # ======================
+
 
 def test_dice_loss_returns_scalar_and_is_finite() -> None:
     criterion = DiceLoss()
@@ -66,19 +68,17 @@ def test_iou_score_range_and_extremes() -> None:
 # Checkpoint loading helper
 # =========================
 
+
 def test_load_model_roundtrip_state_dict(tmp_path: Path) -> None:
     net = UNetSmall(in_ch=3, base_ch=16)
     net.eval()
 
-    # Save a checkpoint containing the raw state_dict
     ckpt_path = _tmp_checkpoint_path(tmp_path, "raw_state.pth")
     torch.save(net.state_dict(), ckpt_path)
 
-    # Load into a fresh instance
     net2 = UNetSmall(in_ch=3, base_ch=16)
     net2 = load_model(net2, ckpt_path, device="cpu", strict=True)
 
-    # Parameter tensors should match exactly
     for (k1, v1), (k2, v2) in zip(net.state_dict().items(), net2.state_dict().items()):
         assert k1 == k2
         assert torch.equal(v1, v2)
@@ -97,7 +97,6 @@ def test_load_model_wrapped_checkpoint_and_module_prefix(tmp_path: Path) -> None
     net2 = UNetSmall(in_ch=3, base_ch=16)
     net2 = load_model(net2, ckpt_path, device="cpu", strict=True)
 
-    # State dict keys should match original (without module.)
     assert set(net2.state_dict().keys()) == set(net.state_dict().keys())
 
 
@@ -105,11 +104,12 @@ def test_load_model_wrapped_checkpoint_and_module_prefix(tmp_path: Path) -> None
 # bbox_to_mask helper
 # ===================
 
+
 def test_bbox_to_mask_basic() -> None:
     import numpy as np
 
     h, w = 10, 20
-    bbox = (2, 3, 7, 8)  # x1,y1,x2,y2
+    bbox = (2, 3, 7, 8)
     mask = bbox_to_mask(h, w, bbox)
 
     assert mask.shape == (h, w)
@@ -123,11 +123,11 @@ def test_bbox_to_mask_basic() -> None:
 # OCR crop helper
 # ===============
 
+
 def test_extract_plate_crop_returns_expected_height() -> None:
     import numpy as np
     import cv2
 
-    # Synthetic image + rectangular mask
     img = np.zeros((120, 200, 3), dtype=np.uint8)
     cv2.rectangle(img, (50, 40), (150, 70), (255, 255, 255), -1)
 
