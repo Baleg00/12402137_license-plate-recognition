@@ -19,27 +19,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from training import create_model, load_model
-from helpers import letterbox_rgb, unletterbox_mask
-
-
-def overlay_mask(img_rgb: np.ndarray, mask: np.ndarray, alpha: float = 0.45) -> np.ndarray:
-    """
-    Create an overlay highlighting mask region (red) on the RGB image.
-    mask must be HxW with values {0,1}.
-    """
-    overlay = img_rgb.copy()
-    red = np.zeros_like(img_rgb)
-    red[..., 0] = 255  # red channel
-
-    m = mask.astype(bool)
-    overlay[m] = (alpha * red[m] + (1 - alpha) * overlay[m]).astype(np.uint8)
-
-    # Add contour for clarity
-    m_u8 = (mask * 255).astype(np.uint8)
-    cnts, _ = cv2.findContours(m_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(overlay, cnts, -1, (255, 255, 0), 2)  # yellow contour
-
-    return overlay
+from helpers import letterbox_rgb, unletterbox_mask, overlay_mask
 
 
 def main() -> None:

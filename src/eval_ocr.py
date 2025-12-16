@@ -8,10 +8,13 @@ from typing import Optional, Tuple, Dict, List, Literal
 
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 
 import easyocr
 
-from helpers import letterbox_rgb, unletterbox_mask, IMAGENET_MEAN, IMAGENET_STD
+from tqdm import tqdm
+
+from helpers import letterbox_rgb, unletterbox_mask, overlay_mask, IMAGENET_MEAN, IMAGENET_STD
 from training import create_model, load_model
 
 
@@ -24,7 +27,7 @@ def to_model_tensor(rgb_lb: np.ndarray) -> torch.Tensor:
     x = rgb_lb.astype(np.float32) / 255.0
     x = (x - IMAGENET_MEAN) / IMAGENET_STD
     x = np.transpose(x, (2, 0, 1))  # CHW
-    return torch.from_numpy(x).unsqueeze(0)
+    return torch.from_numpy(x).unsqueeze(0).float()
 
 
 def largest_component(mask01: np.ndarray) -> np.ndarray:
@@ -121,8 +124,8 @@ def normalize_plate_text(s: str) -> str:
 
 def parse_gt_from_stem(stem: str) -> str:
     """Extract ground-truth plate text from filename stem."""
-    ALPHA = "ABCDEFGHIJKLMNPQRSTUVWXYZO"
-    ALNUM = "ABCDEFGHIJKLMNPQRSTUVWXYZ0123456789O"
+    ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZO"
+    ALNUM = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789O"
     
     fields = stem.split("-")
     if len(fields) != 7:
@@ -186,7 +189,7 @@ def predict_mask(
     oh, ow = rgb.shape[:2]
 
     rgb_lb, meta = letterbox_rgb(rgb, input_hw)
-    x = to_model_tensor(rgb_lb).to(device)
+    x = to_model_tensor(rgb_lb).to(device, dtype=torch.float32)
 
     logits = model(x)
     probs = torch.sigmoid(logits)[0, 0].cpu().numpy()
@@ -221,22 +224,22 @@ def run_end_to_end_ocr_eval(
     shuffle: bool = True,
     max_images: Optional[int] = None,
     strict: bool = True,
+    show: bool = False,
 ) -> Dict[str, float]:
     """
     Iterates images listed by split txt, runs segmentation -> OCR -> compares to GT from stem.
     Prints per-image results and returns summary metrics.
     """
     dataset_root = Path(dataset_root)
-    data_dir = dataset_root / split_txt
-    stems_path = dataset_root / split_txt
+    split_path = dataset_root / "splits" / split_txt
 
-    stems = [ln.strip() for ln in stems_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    images = [(Path(line), Path(line).stem) for line in split_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     
     if shuffle:
-        random.shuffle(stems)
+        random.shuffle(images)
     
     if max_images is not None:
-        stems = stems[:max_images]
+        images = images[:max_images]
 
     # Load segmentation model
     model, _, device = create_model(attention=attention)
@@ -253,8 +256,8 @@ def run_end_to_end_ocr_eval(
     exact_match = 0
     char_acc_sum = 0.0
 
-    for stem in stems:
-        img_path = data_dir / f"{stem}.jpg"
+    for path, stem in tqdm(images, desc="Evaluating", leave=False):
+        img_path = dataset_root / path
         if not img_path.is_file():
             continue
 
@@ -290,6 +293,18 @@ def run_end_to_end_ocr_eval(
         is_em = (pred == gt)
         exact_match += int(is_em)
 
+        # debug visualization
+        if show:
+            show_debug_visualization(
+                img_bgr=bgr,
+                mask=mask,
+                plate_bgr=plate_bgr,
+                ocr_img=ocr_img,
+                stem=stem,
+                gt=gt,
+                pred=pred,
+            )
+
         # character-level accuracy via normalized Levenshtein
         if len(gt) > 0:
             dist = levenshtein(pred, gt)
@@ -298,7 +313,8 @@ def run_end_to_end_ocr_eval(
             cla = 0.0
         char_acc_sum += cla
 
-        print(f"{stem} | GT={gt:>10s} | OCR={pred:>10s} | EM={is_em} | CLA={cla:.3f}")
+        if show:
+            print(f"{path} | GT={gt:s} | OCR={pred:s} | EM={is_em} | CLA={cla:.3f}")
 
     emr = exact_match / max(n_total, 1)
     cla_mean = char_acc_sum / max(n_total, 1)
@@ -316,6 +332,59 @@ def run_end_to_end_ocr_eval(
         print(f"  {k}: {v}")
 
     return summary
+
+
+# ===================
+# Debug Visualization
+# ===================
+
+def show_debug_visualization(
+    img_bgr: np.ndarray,
+    mask: np.ndarray,
+    plate_bgr: Optional[np.ndarray],
+    ocr_img: Optional[np.ndarray],
+    stem: str,
+    gt: str,
+    pred: str,
+) -> None:
+    """
+    Matplotlib debug view: input, mask, overlay, rectified crop, OCR input.
+    """
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    overlay = overlay_mask(img_rgb, mask)
+
+    plt.figure(figsize=(14, 6))
+    plt.suptitle(f"{stem} | GT={gt} | OCR={pred}", fontsize=12)
+
+    plt.subplot(2, 3, 1)
+    plt.title("Input")
+    plt.imshow(img_rgb)
+    plt.axis("off")
+
+    plt.subplot(2, 3, 2)
+    plt.title("Predicted mask")
+    plt.imshow(mask, cmap="gray")
+    plt.axis("off")
+
+    plt.subplot(2, 3, 3)
+    plt.title("Overlay")
+    plt.imshow(overlay)
+    plt.axis("off")
+
+    plt.subplot(2, 3, 4)
+    plt.title("Rectified plate crop" if plate_bgr is not None else "Rectified plate crop (None)")
+    if plate_bgr is not None:
+        plt.imshow(cv2.cvtColor(plate_bgr, cv2.COLOR_BGR2RGB))
+    plt.axis("off")
+
+    plt.subplot(2, 3, 5)
+    plt.title("OCR input" if ocr_img is not None else "OCR input (None)")
+    if ocr_img is not None:
+        plt.imshow(ocr_img, cmap="gray")
+    plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
 
 
 # =============
@@ -340,9 +409,6 @@ def main():
 
     args = ap.parse_args()
 
-    # Note: run_end_to_end_ocr_eval already loads the model strictly. If you want to pass strict through,
-    # adapt it to accept a strict flag and forward into load_model().
-    # Here we just call it directly with your existing signature.
     run_end_to_end_ocr_eval(
         dataset_root=Path(args.data),
         checkpoint_path=Path(args.ckpt),
@@ -354,6 +420,7 @@ def main():
         shuffle=args.shuffle,
         max_images=args.max_images,
         strict=args.strict,
+        show=args.show,
     )
 
 
