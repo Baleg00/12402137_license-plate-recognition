@@ -118,8 +118,11 @@ def enhance_for_ocr(plate_bgr: np.ndarray, out_h: int = 48) -> np.ndarray:
 
 
 def normalize_plate_text(s: str) -> str:
-    """Uppercase and keep only A-Z0-9."""
-    return re.sub(r"[^A-Z0-9]", "", s.upper())
+    """Uppercase, alphanumeric and last 6 characters."""
+    s = re.sub(r"[^A-Z0-9]", "", s.upper())
+    if len(s) > 6:
+        s = s[-6:]
+    return s
 
 
 def parse_gt_from_stem(stem: str) -> str:
