@@ -125,3 +125,138 @@ Each improvement will be validated through controlled ablations showing metric g
 - Quantitative results: mIoU, Dice, EMR, CLA, latency, params/FLOPs.
 - Qualitative results: visual mask overlays and OCR outputs (success / failure cases).
 - All metrics computed on a fixed held-out validation split for reproducibility.
+
+---
+
+## 6. Usage
+
+I have implemented command-line interfaces for training segmentation models, evaluating checkpoints, and running end-to-end OCR experiments.
+
+### 6.1 Training and Testing Segmentation Models (`main.py`)
+
+The main entry point supports training from scratch, resuming from a checkpoint, and testing a trained model.
+
+#### Train a new model from scratch
+
+```bash
+python src/main.py train \
+  --data CCPD \
+  --epochs 25 \
+  --attention cbam \
+  --out checkpoints/cbam_last.pth
+```
+
+#### Resume training from a checkpoint
+
+```bash
+python src/main.py resume \
+  --data CCPD \
+  --ckpt checkpoints/cbam_last.pth \
+  --epochs 40 \
+  --attention cbam
+```
+
+#### Evaluate a checkpoint on the test set
+
+```bash
+python src/main.py test \
+  --data CCPD \
+  --ckpt checkpoints/cbam_last.pth \
+  --attention cbam
+```
+
+Supported attention modes:
+
+- `none` (baseline U-Net)
+- `se` (Squeeze-and-Excitation)
+- `cbam` (Convolutional Block Attention Module)
+
+---
+
+### 6.2 Single-Image Evaluation (`eval_one_image.py`)
+
+Run inference on a single image and visualize the segmentation result.
+
+```bash
+python src/eval_one_image.py \
+  --ckpt checkpoints/best_cbam.pth \
+  --image path/to/image.jpg \
+  --model cbam \
+  --thr 0.5
+```
+
+This script displays:
+
+- Original image
+- Predicted segmentation mask
+- Overlay highlighting the segmented license plate
+- Cropped plate region derived from the mask
+
+![Original image, predicted segmentation mask and highlight](docs/eval_one_image_0.png)
+![Cropped plate region](docs/eval_one_image_1.png)
+
+---
+
+### 6.3 End-to-End OCR Evaluation (`eval_ocr.py`)
+
+Evaluate the full pipeline: segmentation -> post-processing -> EasyOCR -> comparison with ground truth encoded in the image filename.
+
+```bash
+python src/eval_ocr.py \
+  --data CCPD \
+  --ckpt checkpoints/best_cbam.pth \
+  --attention cbam \
+  --split test.txt \
+  --langs en \
+  --show
+```
+
+Options:
+
+- `--show` enables per-image debug visualizations (segmentation, rectified crop, OCR input).
+- OCR accuracy is reported using:
+  - Exact Match Rate (EMR)
+  - Character-Level Accuracy (CLA) based on normalized Levenshtein distance.
+
+![Debug visualization](docs/eval_ocr.png)
+
+---
+
+## 7. Model Comparison
+
+The following table summarizes the performance of the best models evaluated on the test set.
+
+| Model Variant  | Attention | Train Loss | Test Loss | Mean IoU   |
+| -------------- | --------- | ---------- | --------- | ---------- |
+| **Baseline**   | None      | 0.5508     | 0.1245    | 0.7423     |
+| **SE Model**   | SE        | 0.3910     | 0.0988    | 0.7418     |
+| **CBAM Model** | CBAM      | 0.8041     | 0.1033    | 0.8111     |
+
+### Observations
+
+- CBAM significantly improves segmentation quality by combining channel and spatial attention, achieving the highest IoU.
+- SE attention improves generalization with minimal overhead but does not outperform the baseline in IoU.
+- The baseline U-Net already provides a strong foundation, validating the effectiveness of the chosen architecture and training setup.
+
+---
+
+## 8. OCR Evaluation Results
+
+I have conducted an end-to-end OCR evaluation using the best-performing segmentation model (CBAM) combined with EasyOCR and the proposed post-processing pipeline.
+
+### Results
+
+| Metric                         | Value      |
+| ------------------------------ | ---------- |
+| Exact Match Rate (EMR)         | 29.6%      |
+| Character-Level Accuracy (CLA) | 74.77%     |
+
+### Discussion
+
+While the exact match rate remains relatively low, the character-level accuracy indicates that the OCR system often predicts partially correct plate strings. Most errors are attributable to:
+
+- Character confusions caused by chinese symbols.
+- Blurred or low quality images.
+- Variations in illumination and perspective not fully handled by the OCR model.
+
+These results show that segmentation quality alone is not sufficient for reliable end-to-end license plate recognition. Further gains are expected from OCR-specific improvements.
