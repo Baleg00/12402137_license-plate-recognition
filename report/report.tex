@@ -1,0 +1,170 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{caption}
+
+\title{License Plate Segmentation and Recognition \\ Applied Deep Learning Project}
+\author{Balázs Róna (12402137)}
+\date{2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Automatic license plate recognition (ALPR) is a classical computer vision problem with strong practical relevance in intelligent transportation systems. Despite decades of research, robust performance in unconstrained real-world settings remains challenging. In this project, a modular end-to-end ALPR pipeline is developed with a focus on deep-learning-based license plate segmentation. A U-Net-style architecture is implemented and extended with modern attention mechanisms. The system is evaluated both at the segmentation level and in an end-to-end OCR setting. The results demonstrate that deep learning is highly effective for plate segmentation, while also highlighting the limitations of generic OCR models for complete ALPR solutions.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction}
+
+\subsection{What Is the Problem?}
+
+The goal of this project is to build an end-to-end system for \emph{automatic license plate recognition} from images of vehicles. Given an input image, the system should:
+\begin{enumerate}[label=(\roman*)]
+    \item Locate and segment the license plate.
+    \item Extract and geometrically normalize the plate region.
+    \item Recognize the alphanumeric characters printed on the plate.
+\end{enumerate}
+
+Rather than treating ALPR as a single monolithic task, this project separates license plate \emph{segmentation} and \emph{optical character recognition (OCR)} in order to better analyze their individual contributions and limitations.
+
+\subsection{Why Is This a Problem?}
+
+License plate recognition is difficult due to several real-world factors:
+\begin{itemize}
+    \item Large variability in illumination, camera viewpoint, weather conditions, and image quality.
+    \item License plates often occupy only a small region of the image.
+    \item OCR models are highly sensitive to misalignment, blur, and low contrast.
+    \item Generic OCR systems are not trained on license-plate-specific fonts and layouts.
+\end{itemize}
+
+Traditional rule-based computer vision approaches struggle to handle these
+variations robustly. As a result, learning-based methods (particularly deep
+convolutional neural networks) have become the dominant approach for the
+localization and segmentation stages of ALPR systems.
+
+\section{Proposed Solution}
+
+\subsection{Overview}
+
+The proposed solution is a modular ALPR pipeline consisting of:
+\begin{enumerate}
+    \item Deep-learning-based license plate segmentation.
+    \item Post-processing and geometric rectification of the segmented plate.
+    \item OCR using a pre-trained text recognition model.
+\end{enumerate}
+
+This design allows individual components to be evaluated and improved independently.
+
+\subsection{License Plate Segmentation}
+
+A lightweight U-Net-style convolutional neural network serves as the baseline segmentation model. To explore improvements, the architecture was extended with attention mechanisms:
+\begin{itemize}
+    \item \textbf{Baseline U-Net}: standard encoder--decoder with skip connections.
+    \item \textbf{SE Attention}: channel-wise feature recalibration.
+    \item \textbf{CBAM}: combined channel and spatial attention.
+\end{itemize}
+
+The models were trained using a combination of binary cross-entropy and Dice loss, and evaluated using Mean Intersection-over-Union (IoU).
+
+\subsection{Post-Processing and OCR}
+
+The predicted segmentation masks are post-processed by:
+\begin{itemize}
+    \item Selecting the largest connected component.
+    \item Fitting a minimum-area rectangle.
+    \item Applying perspective rectification.
+    \item Enhancing contrast and resolution.
+\end{itemize}
+
+OCR is performed using EasyOCR without additional fine-tuning. End-to-end performance is evaluated by comparing the OCR output to the ground-truth license plate text encoded in the image filename.
+
+\section{Why Is This a Solution?}
+
+\subsection{Is Deep Learning a Suitable Approach?}
+
+Deep learning is clearly justified for the segmentation task. Convolutional neural networks are able to learn robust, hierarchical representations that generalize well across variations in lighting, viewpoint, and background. Experimental results confirm this:
+
+\begin{itemize}
+    \item The baseline U-Net already achieves strong segmentation performance.
+    \item Attention mechanisms further improve localization accuracy.
+    \item The CBAM-enhanced model achieves a Mean IoU of 0.81 on the test set.
+\end{itemize}
+
+However, the project also demonstrates an important limitation: high-quality segmentation alone does not guarantee high end-to-end recognition accuracy. Despite strong IoU scores, OCR exact-match accuracy remains relatively low when using a generic OCR model.
+
+Thus, deep learning is a \emph{necessary and effective solution for segmentation}, but \emph{not sufficient by itself} for full ALPR without OCR-specific modeling.
+
+\section{Results}
+
+\subsection{Segmentation Performance}
+
+\begin{table}[h]
+\centering
+\caption{Segmentation performance on the test set.}
+\begin{tabular}{lccc}
+\toprule
+Model & Train Loss & Test Loss & Mean IoU \\
+\midrule
+Baseline U-Net & 0.5508 & 0.1245 & 0.7423 \\
+SE Attention & 0.3910 & 0.0988 & 0.7418 \\
+CBAM Attention & 0.8041 & 0.1033 & \textbf{0.8111} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+CBAM attention provides a clear improvement over both the baseline and SE variants.
+
+\subsection{End-to-End OCR Performance}
+
+On 500 randomly sampled validation images:
+\begin{itemize}
+    \item \textbf{Exact Match Rate}: 29.6\%
+    \item \textbf{Character-Level Accuracy}: 74.77\%
+\end{itemize}
+
+These results indicate that OCR errors are often partial rather than complete failures, highlighting the importance of OCR-specific improvements.
+
+\section{Insights and Lessons Learned}
+
+Key take-aways from the project include:
+\begin{itemize}
+    \item Attention mechanisms (especially CBAM) significantly improve segmentation quality.
+    \item Better segmentation does not automatically translate to better OCR performance.
+    \item Post-processing and geometric normalization are critical for OCR stability.
+    \item Evaluation metrics must match the final task. IoU alone is insufficient for ALPR.
+\end{itemize}
+
+\section{What Would Be Done Differently}
+
+If the project were repeated, the following changes would be made:
+\begin{itemize}
+    \item Use or train a license-plate-specific OCR model.
+    \item Treat OCR as a learning problem rather than a black-box component.
+    \item Explore joint detection--recognition architectures.
+    \item Perform deeper error analysis on OCR character confusions.
+\end{itemize}
+
+\section{Time Investment}
+
+The initial estimate for the project was approximately 50 hours. The actual time spent was approximately 30--40 hours. The reduced effort is mainly due to:
+\begin{itemize}
+    \item Readily available high-quality public datasets.
+    \item Reusable pre-trained OCR models.
+    \item Relatively rapid convergence of the segmentation models.
+\end{itemize}
+
+\section{Conclusion}
+
+This project demonstrates that deep learning is highly effective for license plate segmentation and that modern attention mechanisms can significantly improve performance. At the same time, it highlights that robust end-to-end ALPR requires careful integration of segmentation, post-processing, and OCR components. The results provide a strong baseline and clear directions for future work, particularly in OCR modeling and joint learning approaches.
+
+\bibliographystyle{plain}
+% \bibliography{references}
+
+\end{document}
