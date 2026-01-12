@@ -141,7 +141,6 @@
   <script>
     const GITHUB_OWNER = "Baleg00";
     const GITHUB_REPO = "12402137_license-plate-recognition";
-    const GITHUB_TOKEN = "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";
 
     const SEG_ASSET_BY_MODEL = {
       baseline: "model-base.onnx",
@@ -184,13 +183,7 @@
       const base = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;
       const url = (tag === "latest") ? `${base}/latest` : `${base}/tags/${encodeURIComponent(tag)}`;
 
-      const res = await fetch(url, {
-        headers: {
-          "Accept": "application/vnd.github+json",
-          "Authorization": `Bearer ${GITHUB_TOKEN}`,
-          "X-GitHub-Api-Version": "2022-11-28"
-        }
-      });
+      const res = await fetch(url, { headers: { "Accept": "application/vnd.github+json" } });
 
       if (!res.ok) {
         throw new Error(`GitHub API error (${res.status}): ${await res.text()}`);
